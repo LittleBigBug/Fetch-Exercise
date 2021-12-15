@@ -7,15 +7,15 @@ It just stores everything in memory using lazy_static with thread safety (Arc, R
 This was created as an interview exercise/test for Fetch Rewards. 
 It demonstrates my understanding with HTTP requests, looking ahead for edge-cases, working with git, and writing clean, maintainable code.
 
-You can download binaries in Releases, or you can compile yourself:
+You can download binaries in [Releases](https://github.com/LittleBigBug/Fetch-Exercise/releases/tag/v1.0.0), or you can compile yourself:
 
 ### Compiling
 
 - Install [RustUp](https://rustup.rs/)
 - Clone this repo, CD into it
 - Opt for Rust Nightly for this project: `rustup override set nightly`
-- And then build: `cargo build`
-- Binaries will be found in `./target/debug/`!
+- And then build: `cargo build --release` or debug with `cargo build` (Provides some more logging)
+- Binaries will be found in `./target/release/`!
 
 ## Using
 
