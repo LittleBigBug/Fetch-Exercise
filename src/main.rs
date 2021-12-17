@@ -49,6 +49,7 @@ struct PointTransaction {
 #[derive(Clone)]
 struct PointCache {
     total_points: i32,
+    sorted_transactions: Vec<PointTransaction>,
     points_by_payer: HashMap<String, i32>,
     timestamp: i64,
 }
@@ -94,8 +95,6 @@ fn get_sorted_transactions() -> Vec<PointTransaction> {
 }
 
 fn calculate_spend_points(spend_target: i32) -> SpendResult {
-    calculate_transactions();
-
     let current_cache_read_lock = CURRENT_CACHE.clone();
     let current_cache = current_cache_read_lock.lock().unwrap();
     let active_cache = current_cache.clone().unwrap();
@@ -104,7 +103,7 @@ fn calculate_spend_points(spend_target: i32) -> SpendResult {
         return Err("Not enough points!");
     }
 
-    let transactions_sorted = get_sorted_transactions();
+    let transactions_sorted = active_cache.sorted_transactions;
 
     let mut spend_target_left = spend_target;
     let mut payer_points_spent: HashMap<String, i32> = HashMap::new();
@@ -191,7 +190,7 @@ fn calculate_transactions() {
     let mut total_points: i32 = 0;
     let mut payer_points_total: HashMap<String, i32> = HashMap::new();
 
-    for transaction in transactions_sorted {
+    for transaction in transactions_sorted.clone() {
         let payer = transaction.payer.clone();
         let points = transaction.points.clone();
 
@@ -209,8 +208,9 @@ fn calculate_transactions() {
 
     let new_cache = PointCache {
         total_points,
+        sorted_transactions: transactions_sorted,
         points_by_payer: payer_points_total,
-        timestamp: Utc::now().timestamp(),
+        timestamp: Utc::now().timestamp_millis(),
     };
 
     let current_cache_write_lock = CURRENT_CACHE.clone();
@@ -218,34 +218,25 @@ fn calculate_transactions() {
     *current_cache = Some(new_cache);
 }
 
-fn check_total_points_cache() {
+fn cache_is_stale() -> Bool {
     let current_cache_read_lock = CURRENT_CACHE.clone();
     let current_cache = current_cache_read_lock.lock().unwrap();
+
+    if current_cache.is_none() { true }
 
     let last_transaction_read_lock = LAST_TRANSACTION.clone();
     let last_transaction = last_transaction_read_lock.lock().unwrap();
 
-    if current_cache.is_none() {
-        calculate_transactions();
-        return;
-    }
-
     // No transactions in this case means there's nothing to cache or calculate
-    if last_transaction.is_none() {
-        return;
-    }
+    if last_transaction.is_none() { false }
 
     let active_cache = current_cache.clone().unwrap();
     let current_cache_time = active_cache.timestamp;
 
-    let last_transaction_time = last_transaction.unwrap().timestamp();
+    let last_transaction_time = last_transaction.unwrap().timestamp_millis();
 
-    // If the cache is newer or not stale, nothing to do.
-    if current_cache_time >= last_transaction_time {
-        return;
-    }
-
-    calculate_transactions();
+    // If the cache is newer than or the same as the last transaction, not stale
+    current_cache_time < last_transaction_time
 }
 
 fn insert_transactions(transactions: Vec<PointTransaction>) {
@@ -288,7 +279,7 @@ fn point_transaction(transaction: Json<PointTransactionJSON>) {
     let transaction = PointTransaction {
         payer: transaction_from_json.payer,
         points: transaction_from_json.points,
-        timestamp: timestamp_datetime.timestamp(),
+        timestamp: timestamp_datetime.timestamp_millis(),
     };
 
     insert_transaction(transaction);
@@ -297,7 +288,9 @@ fn point_transaction(transaction: Json<PointTransactionJSON>) {
 
 #[get("/points", format = "application/json")]
 fn get_points() -> Json<HashMap<String, i32>> {
-    check_total_points_cache();
+    if cache_is_stale() {
+        calculate_transactions();
+    }
 
     let current_cache_read_lock = CURRENT_CACHE.clone();
     let current_cache = current_cache_read_lock.lock().unwrap();
@@ -312,7 +305,9 @@ fn get_points() -> Json<HashMap<String, i32>> {
 
 #[get("/points-sum", format = "application/json")]
 fn get_points_total() -> content::Json<String> {
-    check_total_points_cache();
+    if cache_is_stale() {
+        calculate_transactions();
+    }
 
     let current_cache_read_lock = CURRENT_CACHE.clone();
     let current_cache = current_cache_read_lock.lock().unwrap();
@@ -338,6 +333,10 @@ fn spend_points(points: i32) -> ApiResponse<Vec<PointsSpendRespJSON>> {
         };
     }
 
+    if cache_is_stale() {
+        calculate_transactions();
+    }
+
     match calculate_spend_points(points) {
         Ok(spent_points) => {
             let mut transactions: Vec<PointTransaction> = Vec::new();
@@ -349,7 +348,7 @@ fn spend_points(points: i32) -> ApiResponse<Vec<PointsSpendRespJSON>> {
                 transactions.push(PointTransaction {
                     payer: payer.clone().into(),
                     points: points.abs() * -1,
-                    timestamp: Utc::now().timestamp(),
+                    timestamp: Utc::now().timestamp_millis(),
                 });
 
                 spent_points_negative.push(PointsSpendRespJSON {
@@ -359,7 +358,7 @@ fn spend_points(points: i32) -> ApiResponse<Vec<PointsSpendRespJSON>> {
             };
 
             insert_transactions(transactions);
-            calculate_transactions();
+
             ApiResponse {
                 json: GuardJson(Json(spent_points_negative)),
                 status: Status::Ok,
