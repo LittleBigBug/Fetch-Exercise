@@ -9,7 +9,7 @@ use rocket::serde::{Serialize, Deserialize};
 use rocket::response::content;
 use rocket::http::Status;
 
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use rocket::serde::json::serde_json::json;
 use crate::api_response::JsonObject::{ArbitraryJson, GuardJson};
@@ -31,10 +31,10 @@ pub(crate) mod api_response;
 */
 
 lazy_static! {
-    static ref LAST_TRANSACTION: Arc<RwLock<Option<DateTime<Utc>>>> = Arc::new(RwLock::new(None));
-    static ref TRANSACTIONS: Arc<RwLock<Vec<PointTransaction>>> = Arc::new(RwLock::new(Vec::new()));
+    static ref LAST_TRANSACTION: Arc<Mutex<Option<DateTime<Utc>>>> = Arc::new(Mutex::new(None));
+    static ref TRANSACTIONS: Arc<Mutex<Vec<PointTransaction>>> = Arc::new(Mutex::new(Vec::new()));
 
-    static ref CURRENT_CACHE: Arc<RwLock<Option<PointCache>>> = Arc::new(RwLock::new(None));
+    static ref CURRENT_CACHE: Arc<Mutex<Option<PointCache>>> = Arc::new(Mutex::new(None));
 }
 
 //# Data structures (JSON + storage)
@@ -84,7 +84,7 @@ type SpendResult = Result<HashMap<String, i32>, &'static str>;
 
 fn get_sorted_transactions() -> Vec<PointTransaction> {
     let transactions_read_lock = TRANSACTIONS.clone();
-    let transactions = transactions_read_lock.read().unwrap();
+    let transactions = transactions_read_lock.lock().unwrap();
 
     // Ascending sort
     let mut transactions_sorted: Vec<PointTransaction> = transactions.to_vec();
@@ -97,7 +97,7 @@ fn calculate_spend_points(spend_target: i32) -> SpendResult {
     calculate_transactions();
 
     let current_cache_read_lock = CURRENT_CACHE.clone();
-    let current_cache = current_cache_read_lock.read().unwrap();
+    let current_cache = current_cache_read_lock.lock().unwrap();
     let active_cache = current_cache.clone().unwrap();
 
     if spend_target > active_cache.total_points {
@@ -214,16 +214,16 @@ fn calculate_transactions() {
     };
 
     let current_cache_write_lock = CURRENT_CACHE.clone();
-    let mut current_cache = current_cache_write_lock.write().unwrap();
+    let mut current_cache = current_cache_write_lock.lock().unwrap();
     *current_cache = Some(new_cache);
 }
 
 fn check_total_points_cache() {
     let current_cache_read_lock = CURRENT_CACHE.clone();
-    let current_cache = current_cache_read_lock.read().unwrap();
+    let current_cache = current_cache_read_lock.lock().unwrap();
 
     let last_transaction_read_lock = LAST_TRANSACTION.clone();
-    let last_transaction = last_transaction_read_lock.read().unwrap();
+    let last_transaction = last_transaction_read_lock.lock().unwrap();
 
     if current_cache.is_none() {
         calculate_transactions();
@@ -250,10 +250,10 @@ fn check_total_points_cache() {
 
 fn insert_transactions(transactions: Vec<PointTransaction>) {
     let transaction_write_guard = TRANSACTIONS.clone();
-    let mut transaction = transaction_write_guard.write().unwrap();
+    let mut transaction = transaction_write_guard.lock().unwrap();
 
     let last_transaction_write_guard = LAST_TRANSACTION.clone();
-    let mut last_transaction = last_transaction_write_guard.write().unwrap();
+    let mut last_transaction = last_transaction_write_guard.lock().unwrap();
 
     for trs in transactions {
         transaction.push(trs);
@@ -300,7 +300,7 @@ fn get_points() -> Json<HashMap<String, i32>> {
     check_total_points_cache();
 
     let current_cache_read_lock = CURRENT_CACHE.clone();
-    let current_cache = current_cache_read_lock.read().unwrap();
+    let current_cache = current_cache_read_lock.lock().unwrap();
     let points_cache = current_cache.clone().unwrap();
 
     // Copy Hashmap
@@ -315,7 +315,7 @@ fn get_points_total() -> content::Json<String> {
     check_total_points_cache();
 
     let current_cache_read_lock = CURRENT_CACHE.clone();
-    let current_cache = current_cache_read_lock.read().unwrap();
+    let current_cache = current_cache_read_lock.lock().unwrap();
     let points_cache = current_cache.clone().unwrap();
 
     let total_points = points_cache.total_points;
