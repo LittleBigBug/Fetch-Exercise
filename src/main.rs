@@ -4,6 +4,7 @@ use crate::api_response::ApiResponse;
 
 use chrono::prelude::*;
 
+use rocket::serde::json;
 use rocket::serde::json::Json;
 use rocket::serde::{Serialize, Deserialize};
 use rocket::response::content;
@@ -263,9 +264,32 @@ fn insert_transaction(transaction: PointTransaction) {
 //# Routes
 
 #[post("/point-transaction", format = "application/json", data = "<transaction>")]
-fn point_transaction(transaction: Json<PointTransactionJSON>) {
+fn point_transaction(transaction: Json<PointTransactionJSON>) -> (Status, json::Value) {
     // Assuming API keys are handled somewhere safely...
     let transaction_from_json = transaction.into_inner();
+
+    if cache_is_stale() {
+        calculate_transactions();
+    }
+
+    // If the transaction has negative points, check if it will set anything below 0
+    if transaction_from_json.points < 0 {
+        let current_cache_read_lock = CURRENT_CACHE.clone();
+        let current_cache = current_cache_read_lock.lock().unwrap();
+        let points_cache = current_cache.clone().unwrap();
+
+        let payer_points = points_cache.points_by_payer.get(&transaction_from_json.payer);
+
+        if payer_points.is_some() {
+            let left = payer_points.unwrap() - transaction_from_json.points;
+
+            if left < 0 {
+                // In this case I could also just truncate the points, and allow the transaction
+                // or truncate the transaction itself. (Or throw an error, like now)
+                return (Status::BadRequest, json!({ "status": "error", "message": "A payer would have negative points with this transaction!" }));
+            }
+        }
+    }
 
     // https://docs.rs/chrono/0.4.19/chrono/struct.DateTime.html#method.parse_from_rfc3339
     // Parses ISO8601
@@ -284,6 +308,8 @@ fn point_transaction(transaction: Json<PointTransactionJSON>) {
 
     insert_transaction(transaction);
     calculate_transactions();
+
+    (Status::Ok, json!({ "status": "ok", "message": "Transaction added." }))
 }
 
 #[get("/points", format = "application/json")]
